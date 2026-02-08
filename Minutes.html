@@ -605,7 +605,7 @@
          * @param {number} maxRetries - The maximum number of retry attempts.
          * @returns {Promise<string>} - The generated text from the API.
          */
-        async function callApiWithRetries(url, payload, maxRetries = 5) {
+        async function callApiWithRetries(url, payload, maxRetries = 3) {
             let attempt = 0;
             while (attempt < maxRetries) {
                 try {
@@ -634,7 +634,7 @@
                         throw error; // Re-throw the last error
                     }
                     // Exponential backoff: wait 1s, then 2s
-                    const delay = (2 ** (attempt - 1)) * 1000; 
+                    const delay = (2 ** (attempt -1)) * 1000; 
                     console.log(`Retrying in ${delay / 1000}s...`);
                     await sleep(delay);
                 }
@@ -646,38 +646,53 @@
         /**
          * Calls the Gemini API to generate the meeting minutes.
          */
-        async function generateMinutes() {
-            const apiKey = apiKeyInput.value.trim();
-            const clientName = clientNameInput.value.trim();
-            const companyName = companyNameInput.value.trim();
-            const meetingDate = meetingDateInput.value;
-            const meetingStartTime = meetingStartTimeInput.value;
-            const meetingEndTime = meetingEndTimeInput.value;
+       async function generateMinutes() {
+    const apiKey = apiKeyInput.value.trim();
+    const clientName = clientNameInput.value.trim();
+    const companyName = companyNameInput.value.trim();
+    const meetingDateRaw = meetingDateInput.value; // e.g., "2026-01-12"
+    const meetingStartTime = meetingStartTimeInput.value;
+    const meetingEndTime = meetingEndTimeInput.value;
 
-            if (!apiKey) {
-                alert("Please provide your Google AI API Key to proceed.");
-                return;
-            }
-             if (!clientName || !companyName || !meetingDate || !meetingStartTime || !meetingEndTime) {
-                alert("Please fill in all the setup details: Client Name, Company Name, Meeting Date, Start Time, and End Time.");
-                return;
-            }
+    // 1. Format the date to be human-readable (helps the AI recognize it as a fact)
+    const dateOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+    const formattedDate = meetingDateRaw 
+        ? new Date(meetingDateRaw + 'T00:00:00').toLocaleDateString('en-US', dateOptions) 
+        : "Not Specified";
 
-            if (!transcriptContent && !notesContent) {
-                outputSection.classList.remove('hidden');
-                errorMessage.classList.remove('hidden');
-                errorText.textContent = "Please upload a transcript or notes file first.";
-                return;
-            }
+    // 2. Validation
+    if (!apiKey) {
+        alert("Please provide your Google AI API Key to proceed.");
+        return;
+    }
+    if (!clientName || !companyName || !meetingDateRaw || !meetingStartTime || !meetingEndTime) {
+        alert("Please fill in all the setup details: Client Name, Company Name, Meeting Date, Start Time, and End Time.");
+        return;
+    }
 
-            outputSection.classList.remove('hidden');
-            loadingIndicator.classList.remove('hidden');
-            generateBtn.disabled = true;
-            resetOutputState();
+    if (!transcriptContent && !notesContent) {
+        outputSection.classList.remove('hidden');
+        errorMessage.classList.remove('hidden');
+        errorText.textContent = "Please upload a transcript or notes file first.";
+        return;
+    }
 
-            // Construct the prompt for the Gemini API
-            const systemPromptTemplate = `You are an expert administrative assistant. Your task is to generate a formal 'Minutes of Meeting' document from the provided transcript and/or notes. The output MUST be a single block of HTML code suitable for pasting directly into an email. Use inline CSS for styling. Do not include \`<html>\`, \`<head>\`, or \`<body>\` tags. Do not use markdown.
-The input text may contain 'Hinglish' (Hindi words written in English script); you must interpret these phrases and summarize them into professional, standard English. For example, if the text says 'mera naam piyush hai', you should interpret and summarize this as 'Piyush introduced himself'.
+    // UI Updates
+    outputSection.classList.remove('hidden');
+    loadingIndicator.classList.remove('hidden');
+    generateBtn.disabled = true;
+    resetOutputState();
+
+    // 3. Updated System Prompt with "Ground Truth" instructions
+    const systemPromptTemplate = `You are an expert administrative assistant. 
+
+### CRITICAL INSTRUCTION:
+The metadata provided below (Date and Time) is the ABSOLUTE GROUND TRUTH. 
+1. You MUST use "{MEETING_DATE}" as the date.
+2. You MUST use "{MEETING_START_TIME} - {MEETING_END_TIME}" as the time.
+DO NOT use any other dates or times found in the transcript or notes. If the transcript contradicts this, ignore the transcript for these specific fields.
+
+Your task is to generate a formal 'Minutes of Meeting' document. The output MUST be a single block of HTML code suitable for pasting directly into an email. Use inline CSS for styling. Do not include \`<html>\`, \`<head>\`, or \`<body>\` tags. Do not use markdown.
 
 <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
     <h2 style="color: #2c3e50; border-bottom: 2px solid #2c3e50; padding-bottom: 5px;">
@@ -687,8 +702,8 @@ The input text may contain 'Hinglish' (Hindi words written in English script); y
 
     <h3 style="color: #34495e; margin-top: 20px;">Meeting Particulars</h3>
     <ul style="list-style-type: none; padding-left: 0;">
-        <li id="mom-date"><strong>Date:</strong> {MEETING_DATE}</li>
-        <li><strong>Time:</strong> {MEETING_START_TIME} - {MEETING_END_TIME}</li>
+        <li class="mom-date-line"><strong>Date:</strong> {MEETING_DATE}</li>
+        <li class="mom-time-line"><strong>Time:</strong> {MEETING_START_TIME} - {MEETING_END_TIME}</li>
         <li><strong>Mode:</strong> [Fill in from text, e.g., Online, In-Person]</li>
         <li><strong>Place:</strong> [Fill in from text, e.g., Conference Room A, Google Meet]</li>
         <li><strong>Attendees:</strong> [List attendees mentioned in the text]</li>
@@ -711,8 +726,8 @@ The input text may contain 'Hinglish' (Hindi words written in English script); y
         <tbody>
             <tr>
                 <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">1.</td>
-                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Agenda Item 1 from text]</td>
-                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Summarize the key points and discussion for this item]</td>
+                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Agenda Item 1]</td>
+                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Discussion Summary]</td>
             </tr>
         </tbody>
     </table>
@@ -732,62 +747,75 @@ The input text may contain 'Hinglish' (Hindi words written in English script); y
         <tbody>
             <tr>
                 <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">1.</td>
-                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Describe the specific action to be taken]</td>
-                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Person's Name]</td>
+                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Action Point 1]</td>
+                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Name]</td>
                 <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Date]</td>
-                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[High/Medium/Low]</td>
-                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Any relevant notes]</td>
+                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Priority]</td>
+                <td style="padding: 8px; border: 1px solid #ccc; vertical-align: top;">[Notes]</td>
             </tr>
         </tbody>
     </table>
     <p style="text-align: center; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px; font-style: italic;">-----Minutes Concluded-----</p>
 </div>`;
-            const systemPrompt = systemPromptTemplate
-                .replace(/{CLIENT_NAME}/g, clientName)
-                .replace(/{COMPANY_NAME}/g, companyName)
-                .replace('{MEETING_DATE}', meetingDate)
-                .replace('{MEETING_START_TIME}', meetingStartTime)
-                .replace('{MEETING_END_TIME}', meetingEndTime);
 
-            let userQuery = "Please generate the minutes of the meeting from the following information:\n\n";
-            if (transcriptContent) {
-                userQuery += "--- MEETING TRANSCRIPT(S) ---\n" + transcriptContent + "\n\n";
-            }
-            if (notesContent) {
-                userQuery += "--- MEETING NOTE(S) ---\n" + notesContent;
-            }
+    const systemPrompt = systemPromptTemplate
+        .replace(/{CLIENT_NAME}/g, clientName)
+        .replace(/{COMPANY_NAME}/g, companyName)
+        .replace(/{MEETING_DATE}/g, formattedDate)
+        .replace(/{MEETING_START_TIME}/g, meetingStartTime)
+        .replace(/{MEETING_END_TIME}/g, meetingEndTime);
 
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+    let userQuery = "Please generate the minutes of the meeting from the following information:\n\n";
+    if (transcriptContent) {
+        userQuery += "--- MEETING TRANSCRIPT(S) ---\n" + transcriptContent + "\n\n";
+    }
+    if (notesContent) {
+        userQuery += "--- MEETING NOTE(S) ---\n" + notesContent;
+    }
 
-            const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
-                systemInstruction: {
-                    parts: [{ text: systemPrompt }]
-                },
-            };
-            
-            try {
-                const generatedText = await callApiWithRetries(apiUrl, payload);
-                minutesOutput.innerHTML = generatedText;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
-                // Save to Local Storage
-                const saved = storage.saveMom(clientName, companyName, generatedText);
-                if (saved) {
-                    successMessage.classList.remove('hidden');
-                    successText.textContent = "Minutes generated and saved to logs successfully!";
-                } else {
-                    errorMessage.classList.remove('hidden');
-                    errorText.textContent = "Generated MOM, but failed to save to logs.";
-                }
-            } catch (error) {
-                 errorMessage.classList.remove('hidden');
-                 errorText.textContent = `Failed to generate minutes. Error: ${error.message}`;
-            } finally {
-                loadingIndicator.classList.add('hidden');
-                generateBtn.disabled = false;
-            }
+    const payload = {
+        contents: [{ parts: [{ text: userQuery }] }],
+        systemInstruction: {
+            parts: [{ text: systemPrompt }]
+        },
+    };
+    
+    try {
+        let generatedText = await callApiWithRetries(apiUrl, payload);
+
+        // 4. THE BULLETPROOF FIX: Post-processing manipulation
+        // We inject the correct data into the AI's response manually to guarantee accuracy.
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = generatedText;
+
+        const dateLine = tempDiv.querySelector('.mom-date-line');
+        const timeLine = tempDiv.querySelector('.mom-time-line');
+
+        if (dateLine) dateLine.innerHTML = `<strong>Date:</strong> ${formattedDate}`;
+        if (timeLine) timeLine.innerHTML = `<strong>Time:</strong> ${meetingStartTime} - ${meetingEndTime}`;
+
+        const finalHtml = tempDiv.innerHTML;
+        minutesOutput.innerHTML = finalHtml;
+
+        // Save to Local Storage
+        const saved = storage.saveMom(clientName, companyName, finalHtml);
+        if (saved) {
+            successMessage.classList.remove('hidden');
+            successText.textContent = "Minutes generated and saved to logs successfully!";
+        } else {
+            errorMessage.classList.remove('hidden');
+            errorText.textContent = "Generated MOM, but failed to save to logs.";
         }
-        
+    } catch (error) {
+         errorMessage.classList.remove('hidden');
+         errorText.textContent = `Failed to generate minutes. Error: ${error.message}`;
+    } finally {
+        loadingIndicator.classList.add('hidden');
+        generateBtn.disabled = false;
+    }
+}        
         /**
          * Copies specified HTML content to the clipboard.
          */
