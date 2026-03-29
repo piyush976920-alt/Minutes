@@ -10,6 +10,16 @@
     <!-- Mammoth.js for reading .doc and .docx files -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    /* Prevents the 'Sr.' column or cells from showing a grey background when selected */
+#minutes-output td {
+    background-color: transparent !important;
+    outline: none !important;
+}
+
+/* Optional: Customizes the look of the selection so it doesn't look like a 'bug' */
+#minutes-output ::selection {
+    background: rgba(59, 130, 246, 0.2); /* Light blue highlight instead of grey */
+}
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -773,7 +783,8 @@ Your task is to generate a formal 'Minutes of Meeting' document. The output MUST
         userQuery += "--- MEETING NOTE(S) ---\n" + notesContent;
     }
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    // This 'latest' alias will automatically point to the current working Flash model
+const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
 
     const payload = {
         contents: [{ parts: [{ text: userQuery }] }],
